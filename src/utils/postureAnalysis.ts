@@ -1,6 +1,7 @@
 import {
   POSE_INDEX,
   type CalibrationBaseline,
+  type OverallSeverity,
   type PostureAnalysis,
   type PostureDeviation,
   type PostureMetrics,
@@ -97,6 +98,35 @@ export function analyzePosture(landmarks: PoseLandmarks, baseline: CalibrationBa
   }
 
   return { metrics, deviations, landmarksVisible };
+}
+
+// Prioridade: critical > warning > ok — usado tanto no badge de status quanto
+// na cor do overlay do esqueleto no vídeo.
+export function getOverallSeverity(deviations: PostureDeviation[]): OverallSeverity {
+  if (deviations.some((d) => d.severity === 'critical')) return 'critical';
+  if (deviations.some((d) => d.severity === 'warning')) return 'warning';
+  return 'ok';
+}
+
+// Calibrar com um único frame é sensível a micro-oscilações momentâneas;
+// a média de várias amostras coletadas ao longo de ~1.5s deixa a baseline mais estável.
+export function averageBaselines(samples: CalibrationBaseline[]): CalibrationBaseline {
+  const sum = samples.reduce(
+    (acc, b) => ({
+      eyeDistance: acc.eyeDistance + b.eyeDistance,
+      shoulderDistance: acc.shoulderDistance + b.shoulderDistance,
+      shoulderTiltDeg: acc.shoulderTiltDeg + b.shoulderTiltDeg,
+      neckTiltDeg: acc.neckTiltDeg + b.neckTiltDeg,
+    }),
+    { eyeDistance: 0, shoulderDistance: 0, shoulderTiltDeg: 0, neckTiltDeg: 0 },
+  );
+  const n = samples.length;
+  return {
+    eyeDistance: sum.eyeDistance / n,
+    shoulderDistance: sum.shoulderDistance / n,
+    shoulderTiltDeg: sum.shoulderTiltDeg / n,
+    neckTiltDeg: sum.neckTiltDeg / n,
+  };
 }
 
 export function buildBaseline(landmarks: PoseLandmarks): CalibrationBaseline {

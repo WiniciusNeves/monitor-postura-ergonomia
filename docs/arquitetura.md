@@ -28,9 +28,12 @@ Webcam ──▶ @mediapipe/camera_utils (Camera)
         │  compara métricas atuais vs. baseline calibrado
         ▼
     PostureAnalysis { metrics, deviations, landmarksVisible }
+        ▼
+    useStableAnalysis (debounce de ~400ms nos desvios, evita "flapping")
         │
         ├──▶ StatusPanel (UI: badge de status, métricas, lista de desvios)
-        └──▶ usePostureAlerts → utils/alerts.ts (beep via Web Audio API)
+        ├──▶ usePostureAlerts → utils/alerts.ts (beep via Web Audio API)
+        └──▶ cor do overlay do esqueleto (feedback direto no vídeo)
 ```
 
 ## Módulos principais
@@ -40,8 +43,9 @@ Webcam ──▶ @mediapipe/camera_utils (Camera)
 | [App.tsx](../src/App.tsx) | Componente raiz: mantém estado global (monitorando, calibrado, som), orquestra hooks e passa dados para os componentes visuais. |
 | [components/VideoCanvas.tsx](../src/components/VideoCanvas.tsx) | Renderiza o `<video>` (fonte da webcam, oculto/pausado) e o `<canvas>` (overlay desenhado pelo MediaPipe). |
 | [components/StatusPanel.tsx](../src/components/StatusPanel.tsx) | Painel lateral: botões de iniciar/parar monitoramento, calibrar, alternar som, e exibição das métricas/desvios atuais. |
-| [hooks/usePoseTracking.ts](../src/hooks/usePoseTracking.ts) | Integra `Pose` + `Camera` do MediaPipe; converte frames de vídeo em landmarks; gerencia ciclo de vida (start/stop) e retries de acesso à webcam. |
-| [hooks/usePostureAlerts.ts](../src/hooks/usePostureAlerts.ts) | Observa a lista de desvios detectados e dispara alertas sonoros respeitando um cooldown. |
+| [hooks/usePoseTracking.ts](../src/hooks/usePoseTracking.ts) | Integra `Pose` + `Camera` do MediaPipe; converte frames de vídeo em landmarks; gerencia ciclo de vida (start/stop), retries de acesso à webcam, espera pelas globais do MediaPipe carregarem, pausa a câmera com a aba em segundo plano, e desenha o overlay do esqueleto com a cor de severidade recebida. |
+| [hooks/useStableAnalysis.ts](../src/hooks/useStableAnalysis.ts) | Estabiliza no tempo a lista de desvios de `PostureAnalysis` (debounce de ~400ms), evitando que o badge/beep "pisquem" perto da borda de um limiar. |
+| [hooks/usePostureAlerts.ts](../src/hooks/usePostureAlerts.ts) | Observa a lista de desvios detectados (já estabilizada) e dispara alertas sonoros respeitando um cooldown. |
 | [utils/postureAnalysis.ts](../src/utils/postureAnalysis.ts) | Regras de negócio: calcula métricas a partir dos landmarks e gera baseline/desvios com base em limiares (thresholds). |
 | [utils/geometry.ts](../src/utils/geometry.ts) | Funções matemáticas puras: distância euclidiana 3D, ângulo de inclinação, ponto médio. |
 | [utils/alerts.ts](../src/utils/alerts.ts) | Geração do beep sonoro via Web Audio API (`AudioContext`, `OscillatorNode`, `GainNode`). |
@@ -51,10 +55,11 @@ Webcam ──▶ @mediapipe/camera_utils (Camera)
 
 1. Usuário clica em **"Iniciar monitoramento"** → `monitoring = true` → ativa `usePoseTracking`.
 2. `usePoseTracking` inicia a câmera e o modelo `Pose`, populando `landmarks` a cada frame.
-3. Usuário clica em **"Calibrar postura"** (requer landmarks visíveis) → `buildBaseline(landmarks)` grava a postura atual como referência (`baseline`).
-4. A cada atualização de `landmarks`/`baseline`, `analyzePosture()` recalcula `PostureAnalysis` (métricas + desvios) via `useMemo`.
-5. `usePostureAlerts` observa `analysis.deviations` e toca um beep (com cooldown de 4s) quando há desvio e o som está habilitado.
-6. `StatusPanel` renderiza o status atual (badge colorido, métricas numéricas, lista de mensagens de desvio).
-7. Ao parar o monitoramento, o `baseline` é descartado (nova calibração é necessária ao reiniciar).
+3. Usuário clica em **"Calibrar postura"** (requer landmarks visíveis) → `calibrating = true` por `CALIBRATION_DURATION_MS` (1500ms), coletando uma amostra por frame; ao fim, `averageBaselines()` grava a média como referência (`baseline`).
+4. A cada atualização de `landmarks`/`baseline`, `analyzePosture()` recalcula `PostureAnalysis` (métricas + desvios) via `useMemo`, e `useStableAnalysis()` estabiliza a lista de desvios no tempo.
+5. `usePostureAlerts` observa os desvios estabilizados e toca um beep (com cooldown de 4s) quando há desvio e o som está habilitado. A cor do overlay do esqueleto (verde/amarelo/vermelho) também segue essa severidade.
+6. `StatusPanel` renderiza o status atual (badge colorido, métricas numéricas, lista de mensagens de desvio), incluindo estados de carregamento (`isLoading`) e calibração em andamento (`calibrating`).
+7. Ao parar o monitoramento, o `baseline` é preservado (só é descartado ao clicar em "Recalibrar postura" ou recarregar a página); uma calibração em andamento é cancelada.
+8. A preferência de som (`soundEnabled`) é persistida em `localStorage` e recarregada entre sessões.
 
 Mais detalhes sobre o cálculo das métricas e os limiares usados estão em [Fluxo de Detecção de Postura](./fluxo-postura.md).

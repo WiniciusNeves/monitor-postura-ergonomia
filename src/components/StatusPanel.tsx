@@ -4,6 +4,8 @@ interface StatusPanelProps {
   analysis: PostureAnalysis;
   monitoring: boolean;
   isCalibrated: boolean;
+  calibrating: boolean;
+  isLoading: boolean;
   onToggleMonitoring: () => void;
   onCalibrate: () => void;
   soundEnabled: boolean;
@@ -15,6 +17,8 @@ export function StatusPanel({
   analysis,
   monitoring,
   isCalibrated,
+  calibrating,
+  isLoading,
   onToggleMonitoring,
   onCalibrate,
   soundEnabled,
@@ -26,15 +30,19 @@ export function StatusPanel({
 
   const statusLabel = !monitoring
     ? 'Monitoramento parado'
-    : !analysis.landmarksVisible
-      ? 'Aguardando detecção...'
-      : !isCalibrated
-        ? 'Calibração necessária'
-        : hasCritical
-          ? 'Postura crítica'
-          : hasWarning
-            ? 'Atenção à postura'
-            : 'Postura adequada';
+    : isLoading
+      ? 'Carregando modelo de IA...'
+      : !analysis.landmarksVisible
+        ? 'Aguardando detecção...'
+        : calibrating
+          ? 'Calibrando... mantenha a postura correta'
+          : !isCalibrated
+            ? 'Calibração necessária'
+            : hasCritical
+              ? 'Postura crítica'
+              : hasWarning
+                ? 'Atenção à postura'
+                : 'Postura adequada';
 
   const statusClass = hasCritical ? 'critical' : hasWarning ? 'warning' : 'ok';
 
@@ -50,8 +58,8 @@ export function StatusPanel({
         <button onClick={onToggleMonitoring}>
           {monitoring ? 'Parar monitoramento' : 'Iniciar monitoramento'}
         </button>
-        <button onClick={onCalibrate} disabled={!monitoring || !analysis.landmarksVisible}>
-          {isCalibrated ? 'Recalibrar postura' : 'Calibrar postura'}
+        <button onClick={onCalibrate} disabled={!monitoring || !analysis.landmarksVisible || calibrating}>
+          {calibrating ? 'Calibrando...' : isCalibrated ? 'Recalibrar postura' : 'Calibrar postura'}
         </button>
         <label className="status-panel__toggle">
           <input type="checkbox" checked={soundEnabled} onChange={onToggleSound} />

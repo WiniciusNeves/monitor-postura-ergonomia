@@ -5,10 +5,14 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Monitor de Postura e Ergonomia</title>
-    <!-- Scripts UMD do MediaPipe: anexam Pose, Camera e drawConnectors/drawLandmarks em window. -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <!--
+      Scripts UMD do MediaPipe: anexam Pose, Camera e drawConnectors/drawLandmarks em window.
+      `defer` evita bloquear o primeiro paint da página enquanto baixam; o hook
+      usePoseTracking sabe esperar essas globais ficarem disponíveis antes de usá-las.
+    -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous" defer></script>
   </head>
   <body>
     <div id="root"></div>

@@ -25,6 +25,7 @@ monitor-postura-ergonomia/
     │   └── StatusPanel.tsx         # painel de controle e status de postura
     ├── hooks/
     │   ├── usePoseTracking.ts      # integração com @mediapipe/pose + camera_utils
+    │   ├── useStableAnalysis.ts    # debounce temporal dos desvios (anti-flapping)
     │   └── usePostureAlerts.ts     # disparo de alertas sonoros com cooldown
     ├── utils/
     │   ├── postureAnalysis.ts      # regras de negócio: métricas, baseline, desvios

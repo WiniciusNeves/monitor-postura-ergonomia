@@ -6,13 +6,14 @@ Detalhamento do pipeline que vai do frame de vídeo até o alerta exibido/emitid
 
 Arquivo: [src/hooks/usePoseTracking.ts](../src/hooks/usePoseTracking.ts)
 
-1. Ao ativar (`active = true`), o hook busca as globais do MediaPipe em `window` (`Pose`, `Camera`, `drawConnectors`, `drawLandmarks`, `POSE_CONNECTIONS`). Se não existirem, define `error` (bibliotecas não carregadas).
+1. Ao ativar (`active = true`), o hook espera as globais do MediaPipe aparecerem em `window` (`Pose`, `Camera`, `drawConnectors`, `drawLandmarks`, `POSE_CONNECTIONS`), tentando a cada 250ms por até ~5s (`waitForMediapipeGlobals`) — os scripts UMD são carregados com `defer` no `index.html`, então podem ainda não ter terminado de baixar quando o usuário clica em "iniciar". Só define `error` se esgotar as tentativas.
 2. Instancia `Pose` com `locateFile` apontando para a CDN jsDelivr (arquivos do modelo) e opções fixas:
    - `modelComplexity: 1`, `smoothLandmarks: true`, `enableSegmentation: false`, `minDetectionConfidence: 0.5`, `minTrackingConfidence: 0.5`.
-3. Registra `pose.onResults(...)`: a cada frame processado, desenha a imagem da câmera no `<canvas>`, sobrepõe as conexões (`drawConnectors`) e os pontos (`drawLandmarks`), e atualiza o estado `landmarks` com os 33 pontos retornados (`results.poseLandmarks`).
+3. Registra `pose.onResults(...)`: a cada frame processado, desenha a imagem da câmera no `<canvas>`, sobrepõe as conexões (`drawConnectors`) e os pontos (`drawLandmarks`) — usando a cor passada em `overlayColor` (reflete a severidade atual da postura: verde/amarelo/vermelho, ver seção 7) — e atualiza o estado `landmarks` com os 33 pontos retornados (`results.poseLandmarks`).
 4. Instancia `Camera`, que chama `pose.send({ image: videoEl })` a cada frame (resolução alvo 640×480).
 5. Inicia a câmera com **retry/backoff** (`startCameraWithRetry`): tentativas nos delays `[500, 1000, 2000, 3000]` ms, pois câmeras físicas podem falhar no primeiro `getUserMedia` (`NotReadableError`) se acabaram de ser liberadas por outra aba/app.
-6. No cleanup (desativação ou desmontagem), para a câmera (`camera.stop()`) e fecha o modelo (`pose.close()`).
+6. Registra um listener de `visibilitychange`: quando a aba vai para segundo plano, para a câmera (`camera.stop()`, economiza CPU e apaga o indicador de câmera ativa); ao voltar o foco, reinicia com o mesmo retry/backoff.
+7. No cleanup (desativação ou desmontagem), remove o listener de visibilidade, para a câmera (`camera.stop()`) e fecha o modelo (`pose.close()`).
 
 ## 2. Landmarks relevantes
 
@@ -47,7 +48,11 @@ Cada landmark tem `{ x, y, z, visibility? }` (coordenadas normalizadas + confian
 
 ## 4. Calibração (baseline)
 
-Função `buildBaseline(landmarks)` grava, no momento da calibração, os mesmos valores de `eyeDistance`, `shoulderDistance`, `shoulderTiltDeg` e `neckTiltDeg` — usados depois como referência "postura correta" do usuário. Isso é necessário porque a postura ideal varia por pessoa, distância da câmera e ângulo de instalação.
+Função `buildBaseline(landmarks)` grava os mesmos valores de `eyeDistance`, `shoulderDistance`, `shoulderTiltDeg` e `neckTiltDeg` de um frame — usados depois como referência "postura correta" do usuário. Isso é necessário porque a postura ideal varia por pessoa, distância da câmera e ângulo de instalação.
+
+Um único frame é sensível a uma micro-oscilação momentânea, então `App.tsx` não calibra num instante só: ao clicar em "Calibrar postura", coleta uma amostra (`buildBaseline`) por frame durante `CALIBRATION_DURATION_MS` (1500ms) e grava a **média** das amostras (`averageBaselines`, em `postureAnalysis.ts`) como baseline final. Durante essa janela, o badge de status mostra "Calibrando... mantenha a postura correta" e o botão fica desabilitado.
+
+A baseline **não é mais descartada** ao parar o monitoramento — ela permanece na sessão até o usuário clicar em "Recalibrar postura" ou recarregar a página, evitando recalibrar toda vez que só se quer pausar/retomar.
 
 ## 5. Geração de desvios (`analyzePosture`)
 
@@ -66,6 +71,14 @@ Para cada métrica, o desvio (`critical` tem prioridade sobre `warning`) gera um
 - `NECK_TILT` — inclinação do pescoço.
 - `SHOULDER_ASYMMETRY` — assimetria de ombros.
 
+`getOverallSeverity(deviations)` (`postureAnalysis.ts`) resume a lista de desvios num único nível — `'ok' | 'warning' | 'critical'` (prioridade `critical` > `warning` > `ok`) — reaproveitado pelo `StatusPanel` (cor do badge) e pelo `App.tsx` (cor do overlay do esqueleto, ver seção 7).
+
+### Estabilização temporal — `useStableAnalysis`
+
+Arquivo: [src/hooks/useStableAnalysis.ts](../src/hooks/useStableAnalysis.ts)
+
+`analyzePosture` roda a cada frame (~30x/s); perto da borda de um limiar, um desvio pode entrar e sair da lista a cada frame, fazendo o badge/beep "piscar". `useStableAnalysis` recebe a análise bruta e só confirma um desvio depois que ele persiste continuamente por `STABILITY_MS` (400ms); ao desaparecer da lista bruta, é removido imediatamente. Só a lista de `deviations` é estabilizada — as métricas numéricas exibidas continuam ao vivo. `App.tsx` usa a saída desse hook (não a bruta) para o badge, o overlay e os alertas sonoros.
+
 ## 6. Alertas sonoros — `usePostureAlerts` + `alerts.ts`
 
 Arquivo: [src/hooks/usePostureAlerts.ts](../src/hooks/usePostureAlerts.ts)
@@ -79,8 +92,10 @@ Arquivo: [src/utils/alerts.ts](../src/utils/alerts.ts)
 - Usa a Web Audio API (`AudioContext`, `OscillatorNode` senoidal, `GainNode` com envelope de ataque/decaimento exponencial) para gerar um beep sem depender de arquivos de áudio externos.
 - Frequência: **880 Hz** para `critical`, **587 Hz** para `warning`. Duração: ~0.35s.
 
-## 7. Exibição — `StatusPanel`
+## 7. Exibição — `StatusPanel` e overlay do vídeo
 
 Arquivo: [src/components/StatusPanel.tsx](../src/components/StatusPanel.tsx)
 
-Deriva o texto/cor do badge de status a partir da combinação de `monitoring`, `landmarksVisible`, `isCalibrated` e severidade dos desvios (`hasCritical` > `hasWarning` > "Postura adequada"). Exibe também as métricas numéricas (proximidade em %, ângulos em graus) e a lista de mensagens de desvio ativas.
+Deriva o texto/cor do badge de status a partir da combinação de `monitoring`, `isLoading` (carregando o modelo), `landmarksVisible`, `calibrating`, `isCalibrated` e severidade dos desvios (`hasCritical` > `hasWarning` > "Postura adequada"). Exibe também as métricas numéricas (proximidade em %, ângulos em graus) e a lista de mensagens de desvio ativas.
+
+Além do painel, `App.tsx` também dá feedback direto **no próprio vídeo**: o esqueleto desenhado por `usePoseTracking` (conexões + pontos) é colorido conforme `getOverallSeverity` — verde (`#00d4a0`) sem calibração ou postura ok, amarelo (`#ffb020`) em warning, vermelho (`#ff4d4f`) em critical. Essa cor é passada como prop `overlayColor` e chega ao hook com ~1 frame de atraso (repassada via estado, aplicada no próximo frame processado), o que é imperceptível e evita acoplar o hook de captura às regras de negócio de postura.

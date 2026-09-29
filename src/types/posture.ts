@@ -47,3 +47,5 @@ export interface PostureAnalysis {
   deviations: PostureDeviation[];
   landmarksVisible: boolean;
 }
+
+export type OverallSeverity = 'ok' | 'warning' | 'critical';
